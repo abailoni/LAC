@@ -7,7 +7,7 @@ import configargparse
 from utils.data_utils import loadConfigFile
 
 
-def get_options(script='training', ignore_config=False):
+def get_options(script='config_file', ignore_config=False):
     """
     config parser wrapper. Used to generate options object that can be
     propagated throughout all member classes of the trainer class
@@ -17,7 +17,7 @@ def get_options(script='training', ignore_config=False):
     confFile = loadConfigFile("./config/paths.yaml")
     dataPath = confFile['CREMI_data']
 
-    p = configargparse.ArgParser(default_config_files=['%s/data/config/%s.conf' %(dataPath, script)])
+    p = configargparse.ArgParser(default_config_files=['./config/%s.conf' %(script)])
 
     # where to save the net
     def_net_name = 'V5_BN_times100_ft'
