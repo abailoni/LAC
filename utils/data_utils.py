@@ -10,7 +10,7 @@ def loadConfigFile(configpath):
         try:
             config = yaml.load(configfile)
         except Exception as e:
-            print("Could not parse YAML.")
+            print "Could not parse YAML."
             raise e
     return config
 
@@ -141,7 +141,7 @@ def save_h5(path, h5_key, data, overwrite='w-', compression=None):
 TRANSFORMATIONS IMAGES:
 """
 
-def mirror_cube(array, pad_length):
+def mirror_cube(array, pad_length, mode='reflect'):
     """
     The function extends the last two dimensions (x and y) of an array by mirroring the image
        with a certain padding.
@@ -152,7 +152,7 @@ def mirror_cube(array, pad_length):
     :return: extended array
     """
     pad_info = tuple((array.ndim-2)*[(0,0)]+ [(pad_length, pad_length), (pad_length, pad_length)])
-    mirrored_array = np.pad(array, pad_info, mode='reflect')
+    mirrored_array = np.pad(array, pad_info, mode=mode)
     return mirrored_array
 
 def transpose_last(arr):
