@@ -1,5 +1,5 @@
 """
-Environment file
+DataProvider file
 """
 import sys
 import random
@@ -22,6 +22,8 @@ def get_DataProvider(datasetname):
     print 'using dataset: ', datasetname
     # This step is just calling the class CremiDataProvider if Cremi is the name of the dataset and returning
     return getattr(sys.modules[__name__], datasetname + "DataProvider")
+
+
 
 
 class DataProvider(object):
@@ -159,7 +161,7 @@ class BatchProvider(object):
         self.label = None
 
 
-    def init_input_batch(self, preselect_batches=None, quick_eval=True, augment=False):
+    def init_batch(self, preselect_batches=None, quick_eval=True, augment=False):
         """
         Store in the passed variable input the resized version of the input (raw, membrane).
 
@@ -296,10 +298,32 @@ class BatchProvider(object):
         return data_shape
 
 
-    def show_batch_volumina(self, b):
+    def crop_batch_XY(self, center, b, out=None):
+        """
+        Crop the batch XY-input according to the netFov given a center coordinates.
+        Node based, so the netFov should be odd.
+
+        :param center: (x_coord, y_coord)
+        :param b: batch number
+        :param out:
+        :return:
+        """
+        assert(self.netFov%2!=0, "Even netFov, center pixel not defined")
+        pad = self.netFov / 2
+        if out is None:
+            return self.batch[b, :,
+                        center[0]-pad : center[0]+pad+1,
+                        center[1]-pad : center[1]+pad+1]
+        else:
+            out[:] = self.batch[b, :,
+                        center[0]-pad : center[0]+pad+1,
+                        center[1]-pad : center[1]+pad+1]
+
+
+    def show_batch_volumina(self):
         from utils.voluminaView import volumina_n_layer
-        image = np.squeeze(self.batch[:,0,:,:]).astype(np.float32)
-        prob_map = np.squeeze(self.batch[:, 1, :, :]).astype(np.float32)
+        image = self.batch[:,0,:,:].astype(np.float32)
+        prob_map = self.batch[:, 1, :, :].astype(np.float32)
         GTlabels = dtUt.mirror_cube(self.label,self.netFov/2,mode='constant').astype(np.int8)
         volumina_n_layer([image, prob_map, GTlabels], ["Image", "Prob. map", "Labels"])
 
@@ -318,3 +342,123 @@ class BatchProvider(object):
         del global_seeds[:]
         for b in range(self.bs):
             self.global_seeds.append(seeds[b] + self.pad)
+
+
+class LAC_BatchProvider(BatchProvider):
+    """
+    Adds function for computing affinity graph (for the moment only in 2D)
+    TODO:
+        - affinity map
+        - crop image in one center (implement in the upper class)
+    """
+
+    def init_batch(self, preselect_batches=None, quick_eval=True, augment=False):
+        """
+        Compute affinity graph and replace the prob. map in the batch data
+        """
+
+        # Init batch and GT_labels:
+        super(LAC_BatchProvider, self).init_batch(preselect_batches, quick_eval, augment)
+
+        # Compute affinities:
+        nDims_affinities = 2 # 2D for the moment
+        shape_affinities = list(self.batch.shape)
+        shape_affinities[1] = nDims_affinities
+        self.batch_prob_map = self.batch[:, 1, :, :]
+
+        self.log.info("Temporary redundant storage of affinities and prob_map")
+        self.affinities = np.empty(shape_affinities)
+        self.log.warning("Check the def. of the affinities")
+        self.log.warning("Last affinity is wrong...")
+        for axis in range(nDims_affinities):
+            self.affinities[:,axis,...] = self.batch_prob_map - np.roll(self.batch_prob_map,-1,axis=axis+1)
+
+        self.batch = np.concatenate((self.batch, self.affinities),axis=1)
+        self.batch = np.delete(self.batch,1,axis=1) # Delete prob. map
+
+
+    def crop_batch_XY(self, centerPred, b, out=None):
+        """
+        TODO: UPDATE WITH LIST OF CENTERS (one for each batch)
+
+        Crop the batch XY-input according to the netFov given a center coordinates of a selected edge.
+
+        REMARK: centerPred are the coordinates of the selected edge in the prediction coord. system
+                (not in the padded raw-image/edges)
+
+
+        The coordinates of the center pixel and the selected edge are equivalent:
+
+            - if an edge along x is selected: (selected edge: tilted one)
+
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - O - x - x -
+                |   |   \   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+
+
+            - if an edge along y is selected: (selected edge: highlighted one)
+
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - O = x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+
+        In both the previous cases center = (shift_x+2, shift_y+2)
+
+        :param center: xy-coordinates of the central pixel/selected edge
+        :param b: batch number
+        :param out:
+        """
+        assert(self.netFov%2!=0, "Even netFov, center pixel not defined")
+        pad = self.netFov / 2
+        center = np.array(list(centerPred)) + self.netFov / 2
+
+        if out is None:
+            return self.batch[b, :,
+                        center[0]-pad : center[0]+pad+1,
+                        center[1]-pad : center[1]+pad+1]
+        else:
+            out[:] = self.batch[b, :,
+                        center[0]-pad : center[0]+pad+1,
+                        center[1]-pad : center[1]+pad+1]
+
+
+    def show_batch_volumina(self, prob_map=False):
+
+        image = self.batch[:, 0, :, :].astype(np.float32)
+        aff_x = self.batch[:,1,...].astype(np.float32)
+        aff_y = self.batch[:,2,...].astype(np.float32)
+        GTlabels = dtUt.mirror_cube(self.label, self.netFov / 2, mode='constant').astype(np.int8)
+
+        from utils.voluminaView import volumina_n_layer
+        if prob_map:
+            prob_map = self.batch_prob_map.astype(np.float32)
+            volumina_n_layer([image, prob_map, aff_x, aff_y, GTlabels], ["Image", "Prob. map", "aff_x", "aff_y", "Labels"])
+        else:
+            volumina_n_layer([image, aff_x, aff_y, GTlabels], ["Image", "aff_x", "aff_y", "Labels"])
+
+
+def show_cropped_batch_volumina(cropped_batch):
+    image = cropped_batch[:, 0, ...].astype(np.float32)
+    aff_x = cropped_batch[:, 1, ...].astype(np.float32)
+    aff_y = cropped_batch[:, 2, ...].astype(np.float32)
+    from utils.voluminaView import volumina_n_layer
+    volumina_n_layer([image, aff_x, aff_y], ["Image", "aff_x", "aff_y"])
+
+# class croppedBatch(object):
+#     def __init__(self):
+
+
