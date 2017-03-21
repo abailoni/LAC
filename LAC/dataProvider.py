@@ -26,7 +26,7 @@ def get_DataProvider(datasetname):
 
 
 
-class DataProvider(object):
+class DataProvider:
     """
     This class loads the dataset and stores it in self.full_input with dim (slices, channels, dimX, dimY).
 
@@ -122,7 +122,7 @@ class CremiDataProvider(DataProvider):
 
 
 
-class BatchProvider(object):
+class BatchProvider:
     """
     This class takes a DataProvider instance, select some parts of the datasets and store a batch.
 
