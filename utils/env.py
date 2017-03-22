@@ -7,7 +7,7 @@ import numpy as np
 
 
 
-class environment:
+class environment(object):
     def __init__(self):
         self.reset()
 
@@ -61,7 +61,7 @@ class environment:
         return self.state
 
 
-class envState:
+class envState(object):
     def __init__(self):
         pass
 

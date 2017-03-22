@@ -137,6 +137,44 @@ def save_h5(path, h5_key, data, overwrite='w-', compression=None):
     f.close()
 
 
+def merge_h5files(input_paths, output_path, input_h5paths=None, output_h5path='data', slices=None):
+    """
+    The function takes a list of paths to different .h5 files with the same basic structure,
+    select a slice of data from each of them and stack them together
+    along the first dimension.
+
+    Useful for slicing parts of the CREMI dataset (for raw images, affinities and labels)
+
+
+    :type input_paths: str or list of str
+    :param input_h5paths: list of internal paths. By default is 'data' for each dataset.
+    """
+    if not isinstance(input_paths, list):
+        input_paths = [input_paths]
+    N = len(input_paths)
+    if not isinstance(input_h5paths, list):
+        if isinstance(input_h5paths, str):
+            input_h5paths = [input_h5paths]*N
+        else:
+            input_h5paths = ["data"]*N
+    else:
+        assert (len(input_h5paths)==N)
+    if slices:
+        assert (len(slices)==N)
+
+    # Load data:
+    import vigra
+    data = []
+    for i, path, h5_path in zip(range(N), input_paths, input_h5paths):
+        data.append(vigra.readHDF5(path, h5_path))
+        data[i] = data[i][slices[i]]
+    output_data = np.concatenate(tuple(data), axis=0)
+
+    save_h5(output_path,output_h5path,output_data)
+
+
+
+
 """
 TRANSFORMATIONS IMAGES:
 """
