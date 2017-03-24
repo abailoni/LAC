@@ -143,7 +143,7 @@ def merge_h5files(input_paths, output_path, input_h5paths=None, output_h5path='d
     select a slice of data from each of them and stack them together
     along the first dimension.
 
-    Useful for slicing parts of the CREMI dataset (for raw images, affinities and labels)
+    Useful for slicing parts of the CREMI dataset (for raw images, affinities and batchLabels)
 
 
     :type input_paths: str or list of str
@@ -174,12 +174,11 @@ def merge_h5files(input_paths, output_path, input_h5paths=None, output_h5path='d
 
 
 
-
 """
 TRANSFORMATIONS IMAGES:
 """
 
-def mirror_cube(array, pad_length, mode='reflect'):
+def mirror_cube(array, pad_length, mode='reflect',**numpy_pad_extra_kwargs):
     """
     The function extends the last two dimensions (x and y) of an array by mirroring the image
        with a certain padding.
@@ -190,7 +189,7 @@ def mirror_cube(array, pad_length, mode='reflect'):
     :return: extended array
     """
     pad_info = tuple((array.ndim-2)*[(0,0)]+ [(pad_length, pad_length), (pad_length, pad_length)])
-    mirrored_array = np.pad(array, pad_info, mode=mode)
+    mirrored_array = np.pad(array, pad_info, mode=mode, **numpy_pad_extra_kwargs)
     return mirrored_array
 
 def transpose_last(arr):

@@ -1,8 +1,6 @@
 """
 This file should contain the graphs and data structure
 """
-import sys
-
 from utils.graph_utils import init_pixel_graph, contract_nodes
 
 

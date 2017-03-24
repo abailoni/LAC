@@ -6,11 +6,25 @@ import numpy as np
 import networkx as nx
 import logging
 
-def init_pixel_graph(shape,n_dims=None):
+def init_pixel_graph(
+        shape,
+        n_dims=None,
+        get_node_features=None,
+        get_edge_features=None,
+        **feature_kwargs):
     """
+    get_node_features should output something like:
+
+          [(1, {'GTid': 4}),
+           (2, {'GTid': 5}),
+           ... ]
+
+    with input the pixel grid.
+
 
     :param shape: can be an integer or a list of dimensions
     :param n_dims: optional
+    :param feature_kwargs: kwargs inputed to the two feature functions
 
     :return: the created graph
     """
@@ -41,11 +55,19 @@ def init_pixel_graph(shape,n_dims=None):
     indx_redundant = np.nonzero(edges[:, 0] == -9999)
     edges = np.delete(edges, indx_redundant, axis=0)
 
+    # Collect features:
+    if get_node_features:
+        nodes = get_node_features(pixel_grid, **feature_kwargs)
+    else:
+        nodes = pixel_grid.flatten()
+
+    if get_edge_features:
+        edges = get_edge_features(pixel_grid,edges,**feature_kwargs)
 
     log.info("Creating graph...")
     tick = time.time()
     G = nx.MultiGraph()
-    G.add_nodes_from(pixel_grid.flatten())
+    G.add_nodes_from(nodes)
     G.add_edges_from(edges)
     tock = time.time()
     log.debug("Graph created, %f secs" % (tock - tick))

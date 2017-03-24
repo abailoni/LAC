@@ -40,7 +40,7 @@ savedata(affC, googleData+"sampleC.h5")
 # print g1['volumes/raw']
 #
 # rawA = g1['volumes/raw'][:].astype(np.float32)
-# labA = g1['volumes/labels/neuron_ids'][:].astype(np.uint32)
+# labA = g1['volumes/batchLabels/neuron_ids'][:].astype(np.uint32)
 #
 # from utils.voluminaView import volumina_n_layer
 # volumina_n_layer([rawA, affA[0], affA[1], affA[2], labA], ["raw", "affx", "affy", "affz", "labs"])

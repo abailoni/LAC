@@ -7,6 +7,8 @@ import utils.data_utils as dtUt
 import numpy as np
 import logging
 from copy import deepcopy
+import warnings
+
 
 def get_DataProvider(typeDataProvider):
     """
@@ -32,7 +34,7 @@ def get_DataProvider(typeDataProvider):
 
 class DataProvider(object):
     """
-    Generic DataProvider loading raw image, prob. map and GT labels.
+    Generic DataProvider loading raw image, prob. map and GT batchLabels.
 
     Probability map is optional.
     """
@@ -44,11 +46,11 @@ class DataProvider(object):
                  pad=None,
                  netFov=None,
                  h5path_rawImage='volumes/raw',
-                 h5path_labels='volumes/labels/neuron_ids',
+                 h5path_labels='volumes/batchLabels/neuron_ids',
                  probMap_data_h5path='data'):
         """
 
-        :param input_data_path:     it contains both the image and the labels (CREMI style)
+        :param input_data_path:     it contains both the image and the batchLabels (CREMI style)
         :param membProb_data_path:  path for the computed membrane probability map
         :param slices:
         :param mirrowBorders:
@@ -85,11 +87,13 @@ class DataProvider(object):
                 self.probMap = dtUt.mirror_cube(self.probMap, self.pad)
             self.log.warning("Remember to adjust global_patch_size accordingly...")
 
-        # Store some properties of the input:
-        self.n_slices = self.raw_image.shape[0]
-        self.dimX = self.raw_image.shape[1]
-        self.dimY = self.raw_image.shape[2]
-        self.log.debug(("Loaded dataset: (slices, dimX, dimY):", self.n_slices, self.dimX, self.dimY))
+
+        self.num_slices = self.raw_image.shape[0]
+        self.sizeX_raw = self.raw_image.shape[1]
+        self.sizeY_raw = self.raw_image.shape[1]
+        self.log.debug(("Loaded dataset: raw data (slices, dimX, dimY):", self.raw_image.shape))
+        self.log.debug(("Loaded dataset: batchLabels (slices, dimX, dimY):", self.label.shape))
+        self.log.debug(("Loaded dataset: mirroring borders ", self.mirrorBorders))
 
         # Data augmentation: (not sure if it's still used)
         self.augmentations = [lambda x: x,  # no aug
@@ -119,7 +123,11 @@ class DataProvider(object):
         input[:] = self.sel_aug_f(input)
 
     def get_shape_dataset(self):
-        return [self.n_slices, self.dimX, self.dimY]
+        return self.raw_image.shape
+
+    def get_shape_labels(self):
+        return self.labels.shape
+
 
     def show_dataset_volumina(self):
         from utils.voluminaView import volumina_n_layer
@@ -195,3 +203,270 @@ class AffinityDataProvider(DataProvider):
         volumina_n_layer([image]+maps+[affX, affY, affZ, GTlabels], ["Image"]+maps_labels+["Aff. x","Aff. y","Aff. z","Labels"])
 
 
+
+
+class StaticBatchProvider2D:
+    """
+    This class takes a DataProvider instance, select some parts of the datasets and store a batch.
+    This batch will become the static/initial part of the envStatus (raw image/affinities/GTlabels).
+
+    REMARK:
+      - for the moment it works for 2D samples (with possible z-context), but not for 3D cubes.
+
+    Properties:
+        - self.staticBatch useful for initializing graph weights
+        - self.staticBatch_padded (should not be necessary)
+        - self.batchLabels: useful for storing GT in the graph (not padded)
+        - use get_cropped_staticBatch() to get the padded-cropped inputs for the net. Labels at this stage
+            should not be necessary
+    """
+    def __init__(self, dataProvider, batchSize, sizeXYpred=(0,0), netFov=None, zContext=None):
+        """
+        :type dataProvider: AffinityDataProvider
+
+        :param sizeXYpred: size of the box for which we want to get a prediction. By default we take the full dataset.
+        :type sizeXYpred: int or list
+        """
+        # TODO: add z-context option
+        self.log = logging.getLogger(__name__)
+
+        assert (isintance(dataProvider,AffinityDataProvider))
+        self.dataProvider = dataProvider
+        self.bs = batchSize
+        if zContext:
+            raise NotImplemented("Only implementation available: one slice selected")
+        self.netFov = netFov if netFov else self.dataProvider.netFov
+
+        assert(self.netFov), "Missing network fov"
+        assert (self.netFov % 2 != 0, "Even netFov, center pixel not defined")
+
+        self.all_XYinput = False
+        if sizeXYpred==(0,0):
+            # Take all the dataset xy-size: (e.g. for inference)
+            if not self.dataProvider.mirrorBorders:
+                warn_message = "Borders were not mirrored. The batch will include the full dataset, but prediction will \
+                                exclude some border pixels. Activate mirrorBorders for having a full-size prediction"
+                warnings.warn(warn_message)
+                self.log.warning(warn_message)
+            self.all_XYinput = True
+            self.sizeXYraw = np.array([self.dataProvider.sizeX_raw, self.dataProvider.sizeY_raw])
+            self.sizeXYpred = self.sizeXYraw - (self.netFov - 1)
+        else:
+            if isinstance(sizeXYpred, int):
+                sizeXYpred = [sizeXYpred, sizeXYpred]
+            self.sizeXYpred = np.array(sizeXYpred)
+            self.sizeXYraw = self.sizeXYpred + (self.netFov - 1)
+            assert(self.sizeXYraw <= self.dataProvider.sizeX_raw)
+            assert(self.sizeXYraw <= self.dataProvider.sizeY_raw)
+
+        self.batch = None
+        self.batchLabels = None
+
+
+    def init_staticBatch(self,
+                   preselect_slices=None,
+                   typeInputMap='affinities',
+                   quick_eval=True,
+                   augment=False):
+        """
+        Options:
+            - select specific batches (i.e. certain z-slices)
+            - restrict the xy dimension of the prediction
+
+        :param preselect_slices: list of which slices select
+        :return:
+        """
+
+        if typeInputMap!='affinities':
+            raise NotImplemented('Other methods not implemented')
+
+
+        self.staticBatch_padded = np.empty(self.get_staticBatch_padded_shape())
+        self.quick_eval = quick_eval
+        self.augment = augment
+        self.preselect_slices = preselect_slices
+
+        ''' Which z-slices should we select? '''
+        self.log.info("Selecting batch-Z-positions in the dataset")
+        if preselect_slices is not None:
+            self.log.info(("Using preselected batches: ", preselect_slices))
+            assert (self.bs == len(preselect_slices))
+            ind_b = preselect_slices
+        elif self.quick_eval:
+            n_z = self.dataProvider.num_slices
+            ind_b = np.linspace(0, n_z, self.bs, dtype=np.int, endpoint=False)
+            self.log.info(("Using fixed batches with z-slices equally distributed: ", ind_b) )
+        else:
+            ind_b = np.random.permutation(range(self.dataProvider.num_slices))[:self.bs]
+            self.log.warning(("Random selected slices: is it always correct...?", ind_b))
+            if augment:
+                self.dataProvider.pick_augmentation()
+
+
+        ''' Should we restrict the xy dimension of the input? '''
+        self.log.info("Selecting batch-XY-positions in the dataset")
+        if not self.all_XYinput:
+            # Decide where to center the box:
+            if self.quick_eval:
+                # Pick it in the top-left corner:
+                self.log.info('Sampling at the top-left corner of the dataset')
+                ind_x = np.zeros(self.bs, dtype=int)
+                ind_y = np.zeros(self.bs, dtype=int)
+            else:
+                # Choose randomly:
+                self.log.info("Sampling randomly in the XY dimension")
+                ind_x = np.random.randint(0,
+                                          self.dataProvider.sizeX_raw - self.sizeXYraw[0] + 1,
+                                          size=self.bs)
+                ind_y = np.random.randint(0,
+                                          self.dataProvider.sizeY_raw - self.sizeXYraw[1] + 1,
+                                          size=self.bs)
+            for b in range(self.bs):
+                # Raw image:
+                self.staticBatch_padded[b, 0, :, :] = self.dataProvider.raw_image[ind_b[b],
+                                                      ind_x[b]:ind_x[b]+self.sizeXYraw[0],
+                                                      ind_y[b]:ind_y[b]+self.sizeXYraw[1]]
+                self.staticBatch_padded[b, 1:, :, :] = self.dataProvider.affinities[:, ind_b[b],
+                                                       ind_x[b]:ind_x[b] + self.sizeXYraw[0],
+                                                       ind_y[b]:ind_y[b] + self.sizeXYraw[1]]
+        else:
+            self.log.info("All XY size taken")
+            ind_x = np.zeros(self.bs, dtype=int)
+            ind_y = np.zeros(self.bs, dtype=int)
+            self.staticBatch_padded[range(self.bs), 0, ...] = self.dataProvider.raw_image[ind_b]
+            self.staticBatch_padded[range(self.bs), 1:, ...] = self.dataProvider.affinities[:, ind_b, ...]
+
+        self.boxCoords = (ind_b, ind_x, ind_y)
+        if self.augment:
+            self.dataProvider.apply_augmentation(self.staticBatch_padded)
+
+        self.staticBatch = self.staticBatch_padded[...,
+                           self.netFov/2:-self.netFov/2,
+                           self.netFov/2:-self.netFov/2]
+
+        # Compute GTlabel_batch:
+        self._init_batchLabels()
+        return list(self.boxCoords)
+
+
+    def _init_batchLabels(self):
+        self.batchLabels = np.empty(self.get_predictionLabels_shape(), dtype=np.int32)
+
+        if not self.all_XYinput:
+            self.GTlabelBoxCoords = deepcopy(self.boxCoords)
+            ind_b, ind_x, ind_y = self.GTlabelBoxCoords
+            # Adjust prediction box: (different coordinate system)
+            if not self.dataProvider.mirrorBorders:
+                ind_x += self.netFov / 2
+                ind_y += self.netFov / 2
+            self.log.debug(("Return GT batchLabels at coord.:", ind_b, ind_x, ind_y))
+            self.log.debug(("Raw image position:", self.boxCoords))
+            for b in range(self.bs):
+                self.batchLabels[b, :, :] = self.dataProvider.label[ind_b[b],
+                                            ind_x[b]:ind_x[b] + self.sizeXYpred[0],
+                                            ind_y[b]:ind_y[b] + self.sizeXYpred[1]]
+        else:
+            for b in range(self.bs):
+                # Take full image: (or pad if raw image was not mirrored)
+                if self.dataProvider.mirrorBorders:
+                    self.batchLabels[b] = self.dataProvider.label[b, :, :]
+                else:
+                    self.batchLabels[b] = self.dataProvider.label[b,
+                                          self.dataProvider.pad:-self.dataProvider.pad,
+                                          self.dataProvider.pad:-self.dataProvider.pad]
+        if self.augment:
+            self.dataProvider.apply_augmentation(self.batchLabels)
+
+
+        # Do I really need these...?
+        self.batchLabels_padded = dtUt.mirror_cube(self.batchLabels, self.netFov / 2, mode='constant', constant_values=-9999)
+
+    def get_staticBatch_padded_shape(self):
+        """
+        :return: dim(batch_size, channels, padded_sizeX, padded_sizeY)
+
+        Here channels usually is raw+affinities=4, but there could be z-context.
+
+        This batch should actually never be useful externally. The not padded version of the batch will be used
+        at the beginning in the initializiation of the graph.
+        """
+        return [self.bs]+[1+self.dataProvider.affinities.shape[0]]+list(self.sizeXYraw)
+
+
+    def get_predictionLabels_shape(self):
+        """
+        :return: dim(batch_size, sizeX, sizeY)
+
+        (Not padded XY dimensions)
+        """
+        return [self.bs]+list(self.sizeXYpred)
+
+    def get_cropped_staticBatch(self, selected_edgesCoorXY, out=None):
+        """
+        Crop the batch XY-input according to the netFov given a center coordinates of a selected edge.
+
+        REMARK: centerPred are the coordinates of the selected edge in the prediction coord. system
+                (not in the padded raw/affinities)
+
+
+        The coordinates of the center pixel and the selected edge are equivalent:
+
+            - if an edge along x is selected: (selected edge: tilted one)
+
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - O - x - x -
+                |   |   \   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+
+
+            - if an edge along y is selected: (selected edge: highlighted one)
+
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - O = x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+                x - x - x - x - x -
+                |   |   |   |   |
+
+        In both the previous cases center = (shift_x+2, shift_y+2)
+
+        :param selected_edgesCoorXY: xy-coordinates of the central pixel/selected edge
+        :type selected_edgesCoorXY: list or array of shape (2, batch_size)
+        :param out:
+        """
+        pad = self.netFov / 2
+        edgesPadCoor = np.array(selected_edgesCoorXY) + pad
+        assert(padded_centers.shape==[2, self.bs])
+
+        if out is None:
+            return self.staticBatch_padded[range(self.bs), :,
+                        edgesPadCoor[0]-pad : edgesPadCoor[0]+pad+1,
+                        edgesPadCoor[1]-pad : edgesPadCoor[1]+pad+1]
+        else:
+            out[:] = self.staticBatch_padded[range(self.bs), :,
+                        edgesPadCoor[0]-pad : edgesPadCoor[0]+pad+1,
+                        edgesPadCoor[1]-pad : edgesPadCoor[1]+pad+1]
+
+
+    def get_cropped_staticBatch_shape(self):
+        shape = self.get_staticBatch_padded_shape()
+        shape[2] = self.netFov
+        shape[3] = self.netFov
+        return shape
+
+    # def show_batch_volumina(self):
+    #     from utils.voluminaView import volumina_n_layer
+    #     image = self.staticBatch_padded[:,0,:,:].astype(np.float32)
+    #     prob_map = self.batch[:, 1, :, :].astype(np.float32)
+    #     GTlabels = dtUt.mirror_cube(self.batchLabels, self.netFov / 2, mode='constant').astype(np.int8)
+    #     volumina_n_layer([image, prob_map, GTlabels], ["Image", "Prob. map", "Labels"])

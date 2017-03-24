@@ -31,7 +31,7 @@ def volumina_single_layer(data):
 # plot 2 data layers
 def volumina_double_layer(data, overlay):
 	# get data type of the elements of overlay, to determine
-	# if we use a grayscale overlay (float32) or a randomcolors overlay (uint) for labels
+	# if we use a grayscale overlay (float32) or a randomcolors overlay (uint) for batchLabels
 	mask = []
 	for i in range( len(overlay.shape) ):
 		mask.append(0)
@@ -77,7 +77,7 @@ def volumina_n_layer(data, labels = None):
         if labels is not None:
             layer_name = labels[ind]
     	# get data type of the elements d, to determine
-    	# if we use a grayscale overlay (float32) or a randomcolors overlay (uint) for labels
+    	# if we use a grayscale overlay (float32) or a randomcolors overlay (uint) for batchLabels
     	data_type = d.dtype
 
     	if data_type is FloatType or data_type == np.float32 or data_type == np.float64:
@@ -105,7 +105,7 @@ def volumina_flexible_layer(data, layer_types, labels = None):
         if labels is not None:
             layer_name = labels[i]
     	# get data type of the elements d, to determine
-    	# if we use a grayscale overlay (float32) or a randomcolors overlay (uint) for labels
+    	# if we use a grayscale overlay (float32) or a randomcolors overlay (uint) for batchLabels
     	data_type = d.dtype
 
         if layer_types[i] == 'Grayscale':
@@ -178,5 +178,5 @@ def streaming_n_layer(files, keys, labels = None, block_shape = [100,100,100]):
 
 if __name__ == '__main__':
     raw = vigra.readHDF5('/mnt/localdata0/abailoni/datasets/CREMI/sample_A_20160501.hdf','volumes/raw').astype('float32')
-    labels = vigra.readHDF5('/mnt/localdata0/abailoni/datasets/CREMI/sample_A_20160501.hdf','volumes/labels/neuron_ids').astype('uint32')
-    volumina_n_layer([raw,labels],['raw','labels'])
+    labels = vigra.readHDF5('/mnt/localdata0/abailoni/datasets/CREMI/sample_A_20160501.hdf','volumes/batchLabels/neuron_ids').astype('uint32')
+    volumina_n_layer([raw,labels],['raw','batchLabels'])
