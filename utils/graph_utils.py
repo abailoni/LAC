@@ -11,6 +11,7 @@ def init_pixel_graph(
         n_dims=None,
         get_node_features=None,
         get_edge_features=None,
+        get_edge_weights=None,
         **feature_kwargs):
     """
     get_node_features should output something like:
@@ -35,14 +36,17 @@ def init_pixel_graph(
         N_pixels = shape**n_dims
         shape = np.array([shape]*n_dims)
     else:
-        log.warning("Missing check: is shape a list or an array...?")
         shape = np.array(shape)
         N_pixels = np.product(shape)
+
+    n_dims = shape.shape[0]
+
 
     pixel_grid = np.arange(N_pixels).reshape(shape)
 
     # Compute edges for adjacency graph:
     edges = np.ones([n_dims, 2] + list(shape), dtype=np.int32)
+    edges_weights = np.empty([n_dims]+list(shape), dtype=tuple)
     for axis in range(n_dims):
         edges[axis, 0, ...] = pixel_grid
         edges[axis, 1, ...] = np.roll(pixel_grid, -1, axis=axis)
@@ -50,10 +54,22 @@ def init_pixel_graph(
         last_col_slice = [axis, 0] + [slice(None)] * axis + [slice(-1, None)] + [slice(None)] * (n_dims - 1 - axis)
         edges[last_col_slice] = -9999
 
+        # TODO: not decent...
+        if get_edge_weights:
+            edges_weights[axis, ...] = get_edge_weights(axis=axis, **feature_kwargs)
+
+
+
+    # Edge shape: (axis, 2, coor_x, coor_y, coor_z)
+
     # Delete redundant edges:
     edges = np.reshape(np.transpose(edges, [0] + range(2, 2 + n_dims) + [1]), [-1, 2])
+    edges_weights = edges_weights.flatten()
     indx_redundant = np.nonzero(edges[:, 0] == -9999)
     edges = np.delete(edges, indx_redundant, axis=0)
+    edges_weights  = np.delete(edges_weights, indx_redundant)
+
+    # Edge shape: (num. pairs, 2)
 
     # Collect features:
     if get_node_features:
@@ -62,9 +78,10 @@ def init_pixel_graph(
         nodes = pixel_grid.flatten()
 
     if get_edge_features:
-        edges = get_edge_features(pixel_grid,edges,**feature_kwargs)
+        edges = get_edge_features(pixel_grid,edges,edges_weights,**feature_kwargs)
 
-    log.info("Creating graph...")
+
+    log.debug("Creating graph...")
     tick = time.time()
     G = nx.MultiGraph()
     G.add_nodes_from(nodes)
@@ -125,6 +142,8 @@ def contract_nodes(G, u, v, self_loops=False):
     -----
     This function is also available as ``identified_nodes``.
     """
+    from itertools import chain
+
     H = G
     if H.is_directed():
         in_edges = ((w, u, d) for w, x, d in G.in_edges(v, data=True)

@@ -46,7 +46,7 @@ class DataProvider(object):
                  pad=None,
                  netFov=None,
                  h5path_rawImage='volumes/raw',
-                 h5path_labels='volumes/batchLabels/neuron_ids',
+                 h5path_labels='volumes/labels/neuron_ids',
                  probMap_data_h5path='data'):
         """
 
@@ -72,7 +72,7 @@ class DataProvider(object):
         if probMap_data_path:
             self.probMap = dtUt.loaddata(probMap_data_path, h5_key=probMap_data_h5path, slices=self.slices)[0]
             assert(self.raw_image.shape==self.probMap.shape)
-            log.info("Probability map loaded correctly")
+            self.log.info("Probability map loaded correctly")
 
         # Expand borders (by mirroring image)
         self.mirrorBorders = mirrowBorders
@@ -230,7 +230,7 @@ class StaticBatchProvider2D:
         # TODO: add z-context option
         self.log = logging.getLogger(__name__)
 
-        assert (isintance(dataProvider,AffinityDataProvider))
+        assert (isinstance(dataProvider,AffinityDataProvider))
         self.dataProvider = dataProvider
         self.bs = batchSize
         if zContext:
@@ -256,11 +256,9 @@ class StaticBatchProvider2D:
                 sizeXYpred = [sizeXYpred, sizeXYpred]
             self.sizeXYpred = np.array(sizeXYpred)
             self.sizeXYraw = self.sizeXYpred + (self.netFov - 1)
-            assert(self.sizeXYraw <= self.dataProvider.sizeX_raw)
-            assert(self.sizeXYraw <= self.dataProvider.sizeY_raw)
+            assert(self.sizeXYraw[0] <= self.dataProvider.sizeX_raw)
+            assert(self.sizeXYraw[1] <= self.dataProvider.sizeY_raw)
 
-        self.batch = None
-        self.batchLabels = None
 
 
     def init_staticBatch(self,
@@ -287,7 +285,7 @@ class StaticBatchProvider2D:
         self.preselect_slices = preselect_slices
 
         ''' Which z-slices should we select? '''
-        self.log.info("Selecting batch-Z-positions in the dataset")
+        self.log.debug("Selecting batch-Z-positions in the dataset:")
         if preselect_slices is not None:
             self.log.info(("Using preselected batches: ", preselect_slices))
             assert (self.bs == len(preselect_slices))
@@ -304,7 +302,7 @@ class StaticBatchProvider2D:
 
 
         ''' Should we restrict the xy dimension of the input? '''
-        self.log.info("Selecting batch-XY-positions in the dataset")
+        self.log.debug("Selecting batch-XY-positions in the dataset")
         if not self.all_XYinput:
             # Decide where to center the box:
             if self.quick_eval:
@@ -340,9 +338,10 @@ class StaticBatchProvider2D:
         if self.augment:
             self.dataProvider.apply_augmentation(self.staticBatch_padded)
 
+        self.pad = self.netFov/2
         self.staticBatch = self.staticBatch_padded[...,
-                           self.netFov/2:-self.netFov/2,
-                           self.netFov/2:-self.netFov/2]
+                           self.pad:-self.pad,
+                           self.pad:-self.pad]
 
         # Compute GTlabel_batch:
         self._init_batchLabels()
@@ -401,7 +400,7 @@ class StaticBatchProvider2D:
         """
         return [self.bs]+list(self.sizeXYpred)
 
-    def get_cropped_staticBatch(self, selected_edgesCoorXY, out=None):
+    def get_cropped_staticBatch(self, selected_edgesCoorXY, out=None, b=None):
         """
         Crop the batch XY-input according to the netFov given a center coordinates of a selected edge.
 
@@ -440,23 +439,43 @@ class StaticBatchProvider2D:
 
         In both the previous cases center = (shift_x+2, shift_y+2)
 
+        Two modes:
+            - selected edges for all batches --> b=None, selected_edgesCoorXY.shape = (bs, 2)
+            - selected edges for a specific batches b --> selected_edgesCoorXY.shape = (num_edges, 2)
+
         :param selected_edgesCoorXY: xy-coordinates of the central pixel/selected edge
-        :type selected_edgesCoorXY: list or array of shape (2, batch_size)
+        :type selected_edgesCoorXY: array of shape (2, batch_size)
         :param out:
+
+        :param b: array with associoted batches indices
         """
+        assert(selected_edgesCoorXY.shape[1]==2)
+
+        if b is None:
+            assert(selected_edgesCoorXY.shape[0]==self.bs)
+        else:
+            assert (selected_edgesCoorXY.shape[0] == b.shape[0])
+
         pad = self.netFov / 2
-        edgesPadCoor = np.array(selected_edgesCoorXY) + pad
-        assert(padded_centers.shape==[2, self.bs])
+        edgesPadCoor = selected_edgesCoorXY + pad
+
 
         if out is None:
-            return self.staticBatch_padded[range(self.bs), :,
-                        edgesPadCoor[0]-pad : edgesPadCoor[0]+pad+1,
-                        edgesPadCoor[1]-pad : edgesPadCoor[1]+pad+1]
-        else:
-            out[:] = self.staticBatch_padded[range(self.bs), :,
-                        edgesPadCoor[0]-pad : edgesPadCoor[0]+pad+1,
-                        edgesPadCoor[1]-pad : edgesPadCoor[1]+pad+1]
+            if b is None:
+                out = np.empty(self.get_cropped_staticBatch_shape())
+            else:
+                shape = self.get_cropped_staticBatch_shape()
+                shape[0] = b.shape[0]
+                out = np.empty(shape)
 
+        if b is None:
+            b = range(self.bs)
+
+        for batch in b:
+            out[:] = self.staticBatch_padded[batch, :,
+                        edgesPadCoor[batch,0]-pad : edgesPadCoor[batch,0]+pad+1,
+                        edgesPadCoor[batch,1]-pad : edgesPadCoor[batch,1]+pad+1]
+        return out
 
     def get_cropped_staticBatch_shape(self):
         shape = self.get_staticBatch_padded_shape()

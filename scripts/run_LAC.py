@@ -11,8 +11,8 @@ logging.basicConfig(level=logging.INFO)
 confFile = loadConfigFile("./config/paths.yaml")
 CREMI_data_path = confFile['CREMI_data_path']
 
-netFov = 71
-n_batches = 200
+netFov = 5
+n_batches = 10
 
 
 # Load dataset:
@@ -23,9 +23,7 @@ dataProvider = dtProv.AffinityDataProvider(
     mirrowBorders=True,
     netFov=netFov)
 
-dataProvider.show_dataset_volumina()
-
-
+# dataProvider.show_dataset_volumina()
 
 # # OLD STUFF:
 #
@@ -42,3 +40,9 @@ dataProvider.show_dataset_volumina()
 # # dtProv.show_cropped_batch_volumina(cropped_batch)
 
 
+batchProv = dtProv.StaticBatchProvider2D(dataProvider,n_batches,sizeXYpred=(10,10),netFov=netFov)
+
+from LAC.env import LACstate
+
+options = []
+prova = LACstate(batchProv, options)

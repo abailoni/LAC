@@ -17,8 +17,8 @@ class environment(object):
         Reset the environment
         :return:
         """
-        self.state, self.actions = envState()
-        self.num_act = self.actions.shape[0]
+        self.state = envState()
+        self.num_act = self.action_space.shape[0]
         self.total_reward = 0
 
         # TODO: introduce global history? Lists or np.arrays?
@@ -30,9 +30,8 @@ class environment(object):
 
     def perform_action(self, action):
         assert(action<self.num_act, "Not valid action selected")
-        new_reward = 0
 
-        pass
+        new_reward = self.state.update_state(action)
 
         self.total_reward += new_reward
 
@@ -52,7 +51,7 @@ class environment(object):
         """
         Return the possible actions
         """
-        return self.actions
+        return self.state.action_space
 
     def sample_action(self):
         return np.random.choice(self.num_act)
@@ -63,10 +62,14 @@ class environment(object):
 
 class envState(object):
     def __init__(self):
-        pass
+        self.action_space = None
 
     def return_current_pred(self):
         pass
+
+    def update_state(self, action):
+        reward = None
+        return reward
 
     def render(self):
         pass
