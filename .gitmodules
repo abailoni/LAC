@@ -1,0 +1,14 @@
+[submodule "externals/antipasti-tf"]
+	path = externals/antipasti-tf
+	url = https://github.com/nasimrahaman/antipasti-tf.git
+[submodule "externals/nifty"]
+	path = externals/nifty
+	url = https://github.com/DerThorsten/nifty.git
+	branch = cnn
+[submodule "externals/cremi-skunkworks"]
+	path = externals/cremi-skunkworks
+	url = https://github.com/abailoni/cremi-skunkworks.git
+	branch = patchWorkNET
+[submodule "externals/wsdt"]
+	path = externals/wsdt
+	url = https://github.com/ilastik/wsdt.git
