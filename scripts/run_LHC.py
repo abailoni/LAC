@@ -1,6 +1,6 @@
 from utils.data_utils import loadConfigFile
 import sys
-import LAC.dataProvider as dtProv
+import LHC.dataProvider as dtProv
 
 
 import logging
@@ -42,7 +42,7 @@ dataProvider = dtProv.AffinityDataProvider(
 
 batchProv = dtProv.StaticBatchProvider2D(dataProvider,n_batches,sizeXYpred=(10,10),netFov=netFov)
 
-from LAC.env import LACstate
+from LHC.env import LACstate
 
 options = []
 prova = LACstate(batchProv, options)

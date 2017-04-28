@@ -3,7 +3,7 @@ Here we construct the specific environment and the state.
 """
 import numpy as np
 from utils.env import environment, envState
-from LAC.dataProvider import StaticBatchProvider2D
+from LHC.dataProvider import StaticBatchProvider2D
 from utils.graph_utils import init_pixel_graph
 from utils.extUnionFind import UnionFind
 from utils.numpy_utils import DynamicRecArray
